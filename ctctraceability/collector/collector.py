@@ -3,6 +3,7 @@ import requests
 from kubernetes import client, config
 from datetime import datetime
 
+print("COLLECTOR STARTED", flush=True)
 OPENSEARCH = "http://opensearch.observability.svc.cluster.local:9200"
 
 config.load_incluster_config()
@@ -18,7 +19,7 @@ def deployment_mode():
 
     dep = apps.read_namespaced_deployment(app, ns)
     pods = v1.list_namespaced_pod(ns, label_selector=f"app={app}")
-
+    print(f"Deployment Mode: {app} in {ns}", flush=True)
     for p in pods.items:
         data = {
             "deployment": app,
@@ -29,6 +30,8 @@ def deployment_mode():
             "status": p.status.phase,
             "timestamp": datetime.utcnow().isoformat()
         }
+        print("Sending data to OpenSearch", flush=True)
+        print(payload, flush=True)
         push("deployment-metadata", data)
 
 def cluster_mode():
