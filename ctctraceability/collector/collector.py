@@ -28,13 +28,14 @@ def push(index, data):
 
 
 # ----------------------------------------------------------
-# Fetch Jenkins Metadata from OpenSearch (CI Traceability)
+# Fetch Jenkins Metadata using Image Digest
 # ----------------------------------------------------------
 def fetch_ci_metadata(image_digest):
+
     query = {
         "query": {
-            "match": {
-                "image_digest": image_digest
+            "term": {
+                "image_digest.keyword": image_digest
             }
         },
         "size": 1
@@ -53,7 +54,7 @@ def fetch_ci_metadata(image_digest):
         hits = r.json().get("hits", {}).get("hits", [])
 
         if not hits:
-            print("⚠️ No CI Metadata Found For Tag:", image_tag, flush=True)
+            print("⚠️ No CI Metadata Found For Digest:", image_digest, flush=True)
             return None, None
 
         source = hits[0]["_source"]
@@ -65,28 +66,30 @@ def fetch_ci_metadata(image_digest):
         if commits:
             commit_id = commits[0].get("commit_id")
 
+        print(f"✅ CI Matched: build_id={build_id}", flush=True)
+
         return build_id, commit_id
 
     except Exception as e:
-        print("❌ Exception During CI Lookup:", str(e), flush=True)
+        print(f"❌ Exception During CI Lookup for digest {image_digest}: {str(e)}", flush=True)
         return None, None
 
 
 # ----------------------------------------------------------
-# Deployment Mode (ArgoCD PostSync Hook Mode)
+# Deployment Mode (ArgoCD PostSync Hook)
 # ----------------------------------------------------------
 def deployment_mode():
+
     app = os.getenv("APP_NAME")
     ns = os.getenv("NAMESPACE", "default")
 
-    print(f"\n✅ Deployment Mode Enabled", flush=True)
+    print("\n✅ Deployment Mode Enabled", flush=True)
     print(f"🔹 App: {app}", flush=True)
     print(f"🔹 Namespace: {ns}", flush=True)
 
     # Read Deployment Object
     dep = apps.read_namespaced_deployment(app, ns)
 
-    # Extract Deployment Info
     replicas = dep.spec.replicas
     strategy = dep.spec.strategy.type
     labels = dep.metadata.labels
@@ -97,72 +100,65 @@ def deployment_mode():
 
     print("✅ Using Pod Selector:", label_selector, flush=True)
 
-    # Fetch Pods Belonging to Deployment
     pods = v1.list_namespaced_pod(ns, label_selector=label_selector)
 
     if not pods.items:
         print("⚠️ No Pods Found For Deployment!", flush=True)
         return
 
-    # Loop Pods
+    # Loop Through Pods
     for p in pods.items:
 
-        # Extract Image
         image = p.spec.containers[0].image
-        image_tag = image.split(":")[-1]
 
-        # Extract Digest
+        # ✅ Extract Digest Robustly
         digest = None
         if p.status.container_statuses:
             image_id = p.status.container_statuses[0].image_id
             if "sha256:" in image_id:
                 digest = "sha256:" + image_id.split("sha256:")[-1]
 
-        # Fetch Jenkins Metadata
-        build_id, commit_id = fetch_ci_metadata(image_tag)
+        if not digest:
+            print("❌ Digest not found for pod:", p.metadata.name, flush=True)
+            continue
+
+        # ✅ Fetch CI Metadata using digest
+        build_id, commit_id = fetch_ci_metadata(digest)
 
         # Final Traceability Document
         data = {
-
-            # Deployment Identity
             "deployment": app,
             "namespace": ns,
 
-            # Pod Identity
             "pod": p.metadata.name,
 
-            # Runtime Info
             "image": image,
             "image_digest": digest,
 
-            # Node + Status
             "node": p.spec.node_name,
             "status": p.status.phase,
 
-            # Deployment Info
             "replicas": replicas,
             "strategy": strategy,
             "labels": labels,
 
-            # CI/CD Traceability
             "build_id": build_id,
             "commit_id": commit_id,
 
-            # Timestamp
             "timestamp": datetime.utcnow().isoformat()
         }
 
         print("\n🚀 Sending Deployment Trace Document:", flush=True)
         print(data, flush=True)
 
-        # Push to OpenSearch
         push("deployment-metadata", data)
 
 
 # ----------------------------------------------------------
-# Cluster Mode (Optional Full Cluster Audit)
+# Cluster Mode (Optional)
 # ----------------------------------------------------------
 def cluster_mode():
+
     print("\n✅ Cluster Mode Enabled", flush=True)
 
     pods = v1.list_pod_for_all_namespaces()
