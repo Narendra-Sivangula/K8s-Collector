@@ -30,11 +30,11 @@ def push(index, data):
 # ----------------------------------------------------------
 # Fetch Jenkins Metadata from OpenSearch (CI Traceability)
 # ----------------------------------------------------------
-def fetch_ci_metadata(image_tag):
+def fetch_ci_metadata(image_digest):
     query = {
         "query": {
             "match": {
-                "image_tag": image_tag
+                "image_digest": image_digest
             }
         },
         "size": 1
@@ -115,8 +115,8 @@ def deployment_mode():
         digest = None
         if p.status.container_statuses:
             image_id = p.status.container_statuses[0].image_id
-            if "@" in image_id:
-                digest = image_id.split("@")[-1]
+            if "sha256:" in image_id:
+                digest = "sha256:" + image_id.split("sha256:")[-1]
 
         # Fetch Jenkins Metadata
         build_id, commit_id = fetch_ci_metadata(image_tag)
