@@ -83,6 +83,10 @@ def deployment_mode():
     app = os.getenv("APP_NAME")
     ns = os.getenv("NAMESPACE", "default")
 
+    if not app:
+        print("❌ APP_NAME env variable not provided!", flush=True)
+        return
+
     print("\n✅ Deployment Mode Enabled", flush=True)
     print(f"🔹 App: {app}", flush=True)
     print(f"🔹 Namespace: {ns}", flush=True)
@@ -106,52 +110,66 @@ def deployment_mode():
         print("⚠️ No Pods Found For Deployment!", flush=True)
         return
 
-    # Loop Through Pods
-    for p in pods.items:
+    # ----------------------------------------------------------
+    # ✅ FIX: Pick ONLY the Latest Pod (Newest Deployment Pod)
+    # ----------------------------------------------------------
+    latest_pod = sorted(
+        pods.items,
+        key=lambda pod: pod.metadata.creation_timestamp,
+        reverse=True
+    )[0]
 
-        image = p.spec.containers[0].image
+    p = latest_pod
 
-        # ✅ Extract Digest Robustly
-        digest = None
-        if p.status.container_statuses:
-            image_id = p.status.container_statuses[0].image_id
-            if "sha256:" in image_id:
-                digest = "sha256:" + image_id.split("sha256:")[-1]
+    print("\n✅ Latest Pod Selected:", p.metadata.name, flush=True)
 
-        if not digest:
-            print("❌ Digest not found for pod:", p.metadata.name, flush=True)
-            continue
+    # Extract Image
+    image = p.spec.containers[0].image
+    print("✅ Image Found:", image, flush=True)
 
-        # ✅ Fetch CI Metadata using digest
-        build_id, commit_id = fetch_ci_metadata(digest)
+    # Extract Digest Robustly
+    digest = None
+    if p.status.container_statuses:
+        image_id = p.status.container_statuses[0].image_id
+        if "sha256:" in image_id:
+            digest = "sha256:" + image_id.split("sha256:")[-1]
 
-        # Final Traceability Document
-        data = {
-            "deployment": app,
-            "namespace": ns,
+    if not digest:
+        print("❌ Digest not found for pod:", p.metadata.name, flush=True)
+        return
 
-            "pod": p.metadata.name,
+    print("✅ Digest Found:", digest, flush=True)
 
-            "image": image,
-            "image_digest": digest,
+    # Fetch CI Metadata using digest
+    build_id, commit_id = fetch_ci_metadata(digest)
 
-            "node": p.spec.node_name,
-            "status": p.status.phase,
+    # Final Traceability Document
+    data = {
+        "deployment": app,
+        "namespace": ns,
 
-            "replicas": replicas,
-            "strategy": strategy,
-            "labels": labels,
+        "pod": p.metadata.name,
 
-            "build_id": build_id,
-            "commit_id": commit_id,
+        "image": image,
+        "image_digest": digest,
 
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        "node": p.spec.node_name,
+        "status": p.status.phase,
 
-        print("\n🚀 Sending Deployment Trace Document:", flush=True)
-        print(data, flush=True)
+        "replicas": replicas,
+        "strategy": strategy,
+        "labels": labels,
 
-        push("deployment-metadata", data)
+        "build_id": build_id,
+        "commit_id": commit_id,
+
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    print("\n🚀 Sending Deployment Trace Document:", flush=True)
+    print(data, flush=True)
+
+    push("deployment-metadata", data)
 
 
 # ----------------------------------------------------------
